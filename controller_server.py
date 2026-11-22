@@ -1,6 +1,7 @@
 """Local JSON-lines controller. The environment lives only in this process."""
 import argparse
 import json
+import math
 import signal
 import socket
 import socketserver
@@ -9,6 +10,17 @@ import threading
 from environment import FulfillmentEnv
 
 MAX_LINE = 65536
+
+
+def reject_constant(value):
+    raise ValueError("Non-standard JSON constant")
+
+
+def finite_float(value):
+    result = float(value)
+    if not math.isfinite(result):
+        raise ValueError("Non-finite JSON number")
+    return result
 
 
 class Controller(socketserver.ThreadingTCPServer):
@@ -75,7 +87,8 @@ class Episode(socketserver.StreamRequestHandler):
                     send({"error": "Line too long", "reward": 0})
                     break
                 try:
-                    request = json.loads(line)
+                    request = json.loads(line, parse_constant=reject_constant,
+                                         parse_float=finite_float)
                 except (ValueError, UnicodeDecodeError):
                     send({"error": "Invalid JSON", "reward": 0})
                     continue

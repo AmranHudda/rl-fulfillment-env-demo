@@ -56,6 +56,8 @@ request lines as the stdin interface and sends exactly its response envelopes.
 It closes the connection after termination/truncation. Invalid JSON returns
 `{"error":"Invalid JSON","reward":0}`. Lines over 64 KiB are rejected and the
 connection closes; idle connections close after 60 seconds (`--idle-timeout`).
+Non-standard JSON constants (`NaN`, `Infinity`) and numeric float overflow are
+also rejected as invalid JSON, keeping controller logs strict JSON.
 Only the operator chooses seeds; there is no seed/reset tool. Optional JSONL
 logs contain seed, steps, reward and final snapshot, stay on the controller side,
 and must not be mounted or otherwise made accessible to an actor.
@@ -119,8 +121,8 @@ volume for that path; do not expose it to the actor.
 
 ## Evidence and limits
 
-- 29 tests: the original 19 unchanged tests (including scripted solutions across
-  100 seeds and immutable trace snapshots) plus ten integration tests covering
+- 30 tests: the original 19 unchanged tests (including scripted solutions across
+  100 seeds and immutable trace snapshots) plus eleven integration tests covering
   real subprocess/socket episodes, protocol probes, concurrent independence,
   operator seeds, private logs, defensive input/idle handling, SDK stdio and
   streamable HTTP MCP, explicit controller disconnects, and hardened Docker TCP

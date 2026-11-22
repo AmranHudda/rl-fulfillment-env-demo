@@ -244,6 +244,36 @@ class IsolationTests(unittest.TestCase):
             for value in [str(path), "final_snapshot", '"seed"', *hidden]:
                 self.assertNotIn(value, wire)
 
+    def test_nonfinite_json_rejected_and_log_is_strict(self):
+        def reject(value):
+            raise ValueError("Non-finite JSON")
+
+        def finite(value):
+            from decimal import Decimal
+            number = Decimal(value)
+            if not number.is_finite():
+                raise ValueError("Non-finite JSON")
+            return number
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "strict.jsonl"
+            with controller("--log", str(path)) as port:
+                actor = Actor(port)
+                try:
+                    for value in (b"NaN", b"Infinity", b"-Infinity", b"1e400", b"-1e400"):
+                        line = b'{"tool":"inventory","args":{},"request_id":' + value + b'}\n'
+                        self.assertEqual(actor.raw(line), {"error": "Invalid JSON", "reward": 0})
+                    self.assertIn("observation", actor.call("inventory"))
+                    actor.call("finish")
+                    self.assertEqual(actor.stream.readline(), b"")
+                finally:
+                    actor.close()
+            logs = [json.loads(line, parse_constant=reject, parse_float=finite)
+                    for line in path.read_text().splitlines()]
+            episode = next(log for log in logs if log["steps"])
+            self.assertEqual([step["request"]["tool"] for step in episode["steps"]],
+                             ["inventory", "finish"])
+
 
 @unittest.skipUnless(importlib.util.find_spec("mcp"), "mcp SDK not installed")
 class MCPTests(unittest.TestCase):
