@@ -126,6 +126,8 @@ def wait_ready(port, process):
             raise RuntimeError("Server exited: %s" % process.returncode)
         try:
             actor = Actor(port)
+            actor.socket.shutdown(socket.SHUT_WR)
+            actor.stream.readline()
             actor.close()
             return
         except OSError:
@@ -235,10 +237,18 @@ class IsolationTests(unittest.TestCase):
                     wire = "".join(actor.received)
                 finally:
                     actor.close()
+                empty = Actor(port)
+                try:
+                    self.assertEqual(empty.call("finish")["reward"], 0)
+                    self.assertEqual(empty.stream.readline(), b"")
+                    wire += "".join(empty.received)
+                finally:
+                    empty.close()
             logs = [json.loads(line) for line in path.read_text().splitlines()]
-            episode = next(log for log in logs if log["reward"] == 1)
-            self.assertEqual(set(episode), {"seed", "steps", "reward", "final_snapshot"})
-            self.assertEqual(episode["seed"], 7)
+            self.assertEqual([(log["seed"], log["attempt"], log["reward"]) for log in logs],
+                             [(7, 1, 1), (7, 2, 0)])
+            episode = logs[0]
+            self.assertEqual(set(episode), {"seed", "attempt", "steps", "reward", "final_snapshot"})
             hidden = set(episode["final_snapshot"]["orders"]) - {
                 t["order_id"] for t in episode["final_snapshot"]["tickets"].values()}
             self.assertTrue(hidden)
@@ -271,13 +281,127 @@ class IsolationTests(unittest.TestCase):
                     actor.close()
             logs = [json.loads(line, parse_constant=reject, parse_float=finite)
                     for line in path.read_text().splitlines()]
-            episode = next(log for log in logs if log["steps"])
-            self.assertEqual([step["request"]["tool"] for step in episode["steps"]],
+            self.assertEqual(len(logs), 1)
+            episode = logs[0]
+            self.assertEqual(len(episode["steps"]), 7)
+            self.assertEqual([step["request"]["tool"] for step in episode["steps"]
+                              if step["request"] is not None],
                              ["inventory", "finish"])
+
+
+class SeedAllocationTests(unittest.TestCase):
+    def refusal(self, port):
+        actor = Actor(port)
+        try:
+            self.assertEqual(actor.description, {"error": "No seeds remaining", "reward": 0,
+                                                "terminated": True, "truncated": False})
+            self.assertEqual(actor.stream.readline(), b"")
+        finally:
+            actor.close()
+
+    def finish(self, port):
+        actor = Actor(port)
+        try:
+            self.assertIn("task", actor.description)
+            self.assertEqual(actor.call("finish")["reward"], 0)
+            self.assertEqual(actor.stream.readline(), b"")
+        finally:
+            actor.close()
+
+    def test_once_mode_consumes_each_seed_including_invalid_requests(self):
+        for seeds in (("--seeds", "7-8"), ("--seed", "7")):
+            with self.subTest(seeds=seeds), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "episodes.jsonl"
+                with controller(*seeds, "--each-seed-once", "--log", str(path)) as port:
+                    actor = Actor(port)
+                    try:
+                        self.assertEqual(actor.raw(b"garbage\n"),
+                                         {"error": "Invalid JSON", "reward": 0})
+                        actor.socket.shutdown(socket.SHUT_WR)
+                        self.assertEqual(actor.stream.readline(), b"")
+                    finally:
+                        actor.close()
+                    if seeds[0] == "--seeds":
+                        self.finish(port)
+                    self.refusal(port)
+                logs = [json.loads(line) for line in path.read_text().splitlines()]
+                self.assertEqual([(log["seed"], log["attempt"], log["reward"]) for log in logs],
+                                 [(7, 1, 0), (8, 1, 0)] if seeds[0] == "--seeds" else [(7, 1, 0)])
+
+    def test_no_request_probes_release_without_log_or_cycle_advance(self):
+        for options in ((), ("--each-seed-once",)):
+            with self.subTest(options=options), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "episodes.jsonl"
+                with controller("--seeds", "7-8", "--idle-timeout", "0.2", "--log", str(path),
+                                *options) as port:
+                    for idle in (False, True):
+                        probe = Actor(port)
+                        try:
+                            if not idle:
+                                probe.socket.shutdown(socket.SHUT_WR)
+                            self.assertEqual(probe.stream.readline(), b"")
+                        finally:
+                            probe.close()
+                    self.assertEqual(path.read_text(), "")
+                    self.finish(port)
+                    self.finish(port)
+                logs = [json.loads(line) for line in path.read_text().splitlines()]
+                self.assertEqual([(log["seed"], log["attempt"]) for log in logs], [(7, 1), (8, 1)])
+
+    def test_concurrent_once_mode_reservations_are_distinct(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "episodes.jsonl"
+            with controller("--seeds", "7-8", "--each-seed-once", "--log", str(path)) as port:
+                first, second = Actor(port), Actor(port)
+                try:
+                    self.refusal(port)
+                    self.assertNotEqual(first.call("list_tickets"), second.call("list_tickets"))
+                    for actor in (first, second):
+                        actor.call("finish")
+                        self.assertEqual(actor.stream.readline(), b"")
+                    self.refusal(port)
+                finally:
+                    first.close()
+                    second.close()
+            logs = [json.loads(line) for line in path.read_text().splitlines()]
+            self.assertEqual([(log["seed"], log["attempt"]) for log in logs], [(7, 1), (8, 1)])
+
+    def test_cycling_attempt_numbers_are_per_seed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "episodes.jsonl"
+            with controller("--seeds", "7-8", "--log", str(path)) as port:
+                for _ in range(4):
+                    self.finish(port)
+            logs = [json.loads(line) for line in path.read_text().splitlines()]
+            self.assertEqual([(log["seed"], log["attempt"]) for log in logs],
+                             [(7, 1), (8, 1), (7, 2), (8, 2)])
 
 
 @unittest.skipUnless(importlib.util.find_spec("mcp"), "mcp SDK not installed")
 class MCPTests(unittest.TestCase):
+    def test_exhaustion_first_line_is_tool_result(self):
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+
+        async def run(port):
+            params = StdioServerParameters(command=sys.executable,
+                args=[str(ROOT / "mcp_server.py"), "--controller", "127.0.0.1:%s" % port])
+            async with stdio_client(params) as (read, write):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    result = await session.call_tool("finish", {})
+                    self.assertFalse(result.isError)
+                    self.assertTrue(json.loads(result.content[0].text)["terminated"])
+                    for tool in ("describe_task", "inventory"):
+                        result = await session.call_tool(tool, {})
+                        self.assertFalse(result.isError)
+                        self.assertEqual(json.loads(result.content[0].text), {
+                            "error": "No seeds remaining", "reward": 0,
+                            "terminated": True, "truncated": False})
+
+        with controller("--seed", "7", "--each-seed-once") as port:
+            asyncio.run(run(port))
+
     def test_broken_connection_write_cleanup_and_reconnect(self):
         from mcp_server import ControllerClient
 
@@ -426,7 +550,7 @@ class DockerTests(unittest.TestCase):
             container_id = subprocess.check_output(["docker", "run", "-d", "--rm",
                 "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
                 "--tmpfs", "/tmp", "-p", "127.0.0.1::7000", "-p", "127.0.0.1::8000",
-                tag, "--seed", "7"], text=True).strip()
+                tag, "--seed", "7", "--log", "/tmp/episodes.jsonl"], text=True).strip()
             published = subprocess.check_output(["docker", "port", container_id, "7000"], text=True)
             port = int(published.strip().rsplit(":", 1)[1])
             deadline = time.monotonic() + 20
@@ -438,6 +562,10 @@ class DockerTests(unittest.TestCase):
                     if time.monotonic() > deadline:
                         raise
                     time.sleep(0.1)
+            actor.socket.shutdown(socket.SHUT_WR)
+            self.assertEqual(actor.stream.readline(), b"")
+            actor.close()
+            actor = Actor(port)
             try:
                 self.assertEqual(socket_solve(actor)["reward"], 1)
             finally:
@@ -455,6 +583,15 @@ class DockerTests(unittest.TestCase):
 
                 wait_http_ready(http_port, running)
                 asyncio.run(http_solve(self, http_port))
+            controller_log = subprocess.check_output(["docker", "exec", container_id,
+                "python3", "-c", "from pathlib import Path; print(Path('/tmp/episodes.jsonl').read_text())"],
+                text=True)
+            logs = [json.loads(line) for line in controller_log.splitlines() if line]
+            expected = [(7, 1, 1)]
+            if importlib.util.find_spec("mcp"):
+                expected += [(7, 2, 1), (7, 3, 0)]
+            self.assertEqual([(log["seed"], log["attempt"], log["reward"]) for log in logs],
+                             expected)
         finally:
             if container_id:
                 subprocess.run(["docker", "stop", "-t", "5", container_id], check=True,

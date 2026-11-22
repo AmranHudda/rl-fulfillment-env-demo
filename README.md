@@ -47,6 +47,7 @@ episode and returns the state-based reward.
 ```sh
 python3 controller_server.py --seed 7 --port 7000 --log episodes.jsonl
 # Alternatively: --seeds 7-10 cycles operator-selected seeds per connection.
+# Evaluation without retries: --seeds 7-10 --each-seed-once --log evaluation.jsonl
 ```
 
 The default bind is `127.0.0.1`; use `--host` explicitly to expose it elsewhere.
@@ -59,8 +60,26 @@ connection closes; idle connections close after 60 seconds (`--idle-timeout`).
 Non-standard JSON constants (`NaN`, `Infinity`) and numeric float overflow are
 also rejected as invalid JSON, keeping controller logs strict JSON.
 Only the operator chooses seeds; there is no seed/reset tool. Optional JSONL
-logs contain seed, steps, reward and final snapshot, stay on the controller side,
+logs contain seed, attempt, steps, reward and final snapshot, stay on the controller side,
 and must not be mounted or otherwise made accessible to an actor.
+
+`--each-seed-once` works with either `--seed` or `--seeds`: each seed is played at
+most once per controller run. A connection reserves a seed before the initial
+description, and consumes it when its first request line arrives, including
+invalid JSON or an oversized line. Concurrent once-mode connections cannot
+reserve the same seed. If all seeds are consumed or currently reserved, a new
+connection gets `{"error":"No seeds remaining","reward":0,"terminated":true,
+"truncated":false}` and closes without a log record. An unused reservation goes
+back to the front of the pool when its connection closes or idles out.
+
+In both modes, connections that send no request do not advance the seed cycle,
+count as attempts or create log entries; readiness probes therefore do not play
+episodes. Default mode still cycles and permits repeated attempts. Each played
+episode has a 1-based `attempt` counter for its seed (always 1 in once-mode),
+assigned on its first request; records are appended when episodes end, so
+concurrently played episodes can finish in a different order. Counters and seed
+consumption are in-memory per controller run, not recovered from an existing
+append-only log: use a fresh log for each evaluation run.
 
 ## MCP tools
 
@@ -85,6 +104,8 @@ an action in a new episode. The bridge clears its cached description; the next
 call connects to a fresh episode. `describe_task` also checks for disconnection
 before returning a cached description. Initial connection failures remain MCP
 tool errors rather than claiming an episode was started.
+An initial controller error such as `No seeds remaining` is returned unchanged
+as the tool result, not mistaken for a task description.
 
 A coding agent's MCP configuration can use stdio (replace the absolute path):
 
@@ -124,8 +145,8 @@ SIGTERM/SIGINT shutdown exits zero; forwarded shutdown signals are not failures.
 
 ## Evidence and limits
 
-- 52 tests: the original 19 unchanged tests (including scripted solutions across
-  100 seeds and immutable trace snapshots), 19 grader-audit tests, and fourteen
+- 57 tests: the original 19 unchanged tests (including scripted solutions across
+  100 seeds and immutable trace snapshots), 19 grader-audit tests, and nineteen
   isolation integration tests covering
   real subprocess/socket episodes, protocol probes, concurrent independence,
   operator seeds, private logs, defensive input/idle handling, SDK stdio and
@@ -134,6 +155,12 @@ SIGTERM/SIGINT shutdown exits zero; forwarded shutdown signals are not failures.
   and MCP HTTP published-port solves, strict JSON logs and entrypoint failures.
   MCP tests (including the Docker MCP subtest) skip without the SDK; Docker skips
   without a working daemon. Run `python3 -m unittest -v` for counts and skips.
+- The score is every episode in the log, never the best one. Include failed,
+  abandoned and invalid-request episodes, not just reward-1 episodes. Use
+  `--each-seed-once` and a fresh controller/log for a bounded no-retry evaluation;
+  cycling mode is for development and records every played attempt. Tests check
+  exact episode counts, seeds, attempts and rewards, including readiness probes,
+  exhaustion and concurrent once-mode reservations.
 - Different valid action orders are accepted.
 - Negative cases cover fabricated receipts, missing reservations, protected
   orders, malformed requests, mutation replay, reset, exhausted step budgets and

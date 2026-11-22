@@ -40,6 +40,10 @@ class ControllerClient:
                     self.connection = socket.create_connection(self.address, timeout=60)
                     self.stream = self.connection.makefile("rwb")
                     self.description = self.read()
+                    if "error" in json.loads(self.description):
+                        response = self.description
+                        self.close()
+                        return response
                 if tool is None:
                     if (select.select([self.connection], [], [], 0)[0]
                             and not self.connection.recv(1, socket.MSG_PEEK)):
