@@ -131,6 +131,7 @@ class FulfillmentEnv:
             self._truncated = True
             return {"error": "Step budget exceeded", "reward": 0,
                     "terminated": False, "truncated": True}
+        record_request = False
         try:
             if not isinstance(request, dict) or set(request) - {"tool", "args", "request_id"}:
                 raise TaskError("Invalid request envelope")
@@ -157,14 +158,15 @@ class FulfillmentEnv:
                     if previous != fingerprint:
                         raise TaskError("request_id was already bound to another payload")
                     return copy.deepcopy(result)
+                record_request = True
             result = {"observation": self._run(tool, args), "reward": 0,
                       "terminated": False, "truncated": False}
-            if tool in self.MUTATIONS:
-                self._seen_requests[key] = fingerprint, copy.deepcopy(result)
-            return result
         except TaskError as error:
-            return {"error": str(error), "reward": 0,
-                    "terminated": False, "truncated": False}
+            result = {"error": str(error), "reward": 0,
+                      "terminated": False, "truncated": False}
+        if record_request:
+            self._seen_requests[key] = fingerprint, copy.deepcopy(result)
+        return result
 
     def grade(self):
         """Controller-side oracle: final state, never the actor's success claim."""
