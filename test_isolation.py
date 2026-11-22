@@ -247,6 +247,36 @@ class IsolationTests(unittest.TestCase):
 
 @unittest.skipUnless(importlib.util.find_spec("mcp"), "mcp SDK not installed")
 class MCPTests(unittest.TestCase):
+    def test_controller_idle_loss_is_explicit(self):
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+
+        async def run(port):
+            params = StdioServerParameters(command=sys.executable,
+                args=[str(ROOT / "mcp_server.py"), "--controller", "127.0.0.1:%s" % port])
+            async with stdio_client(params) as (read, write):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+
+                    async def call(tool):
+                        result = await session.call_tool(tool, {})
+                        self.assertFalse(result.isError, result)
+                        return json.loads(result.content[0].text)
+
+                    for tool in ("inventory", "describe_task"):
+                        before = await call("list_tickets")
+                        await asyncio.sleep(0.5)
+                        self.assertEqual(await call(tool), {
+                            "error": "Controller connection lost; episode ended", "reward": 0,
+                            "terminated": True, "truncated": False})
+                        self.assertEqual(set(await call("describe_task")),
+                                         {"task", "tools", "max_steps"})
+                        self.assertNotEqual(await call("list_tickets"), before)
+                        self.assertEqual((await call("finish"))["reward"], 0)
+
+        with controller("--seeds", "7-8", "--idle-timeout", "0.2") as port:
+            asyncio.run(run(port))
+
     def test_sdk_http_tools_and_solve(self):
         with controller("--seed", "7") as port:
             http_port = free_port()

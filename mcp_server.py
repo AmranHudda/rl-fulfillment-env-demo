@@ -1,6 +1,7 @@
 """MCP tools backed exclusively by a remote JSON-lines controller."""
 import argparse
 import json
+import select
 import socket
 import threading
 
@@ -20,6 +21,7 @@ class ControllerClient:
         if self.connection:
             self.connection.close()
         self.stream = self.connection = None
+        self.description = None
 
     def read(self):
         line = self.stream.readline(65537)
@@ -29,12 +31,16 @@ class ControllerClient:
 
     def call(self, tool=None, args=None, request_id=None):
         with self.lock:
+            connected = self.stream is not None
             try:
                 if self.stream is None:
                     self.connection = socket.create_connection(self.address, timeout=60)
                     self.stream = self.connection.makefile("rwb")
                     self.description = self.read()
                 if tool is None:
+                    if (select.select([self.connection], [], [], 0)[0]
+                            and not self.connection.recv(1, socket.MSG_PEEK)):
+                        raise ConnectionError("Controller disconnected")
                     return self.description
                 request = {"tool": tool, "args": args or {}}
                 if request_id is not None:
@@ -46,8 +52,11 @@ class ControllerClient:
                 if result.get("terminated") or result.get("truncated"):
                     self.close()
                 return response
-            except Exception:
+            except (OSError, ValueError):
                 self.close()
+                if connected:
+                    return json.dumps({"error": "Controller connection lost; episode ended",
+                                       "reward": 0, "terminated": True, "truncated": False})
                 raise
 
 

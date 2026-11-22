@@ -76,6 +76,13 @@ description. The other tools are `list_tickets`, `inventory`, `get_order`,
 also require `request_id`). After a terminal result the next call starts a new
 episode. One bridge instance owns one episode connection shared by its callers;
 use separate bridge processes for independent actors.
+If an established controller connection is lost (including idle timeout), the
+detecting call returns `{"error":"Controller connection lost; episode ended",
+"reward":0,"terminated":true,"truncated":false}` rather than silently retrying
+an action in a new episode. The bridge clears its cached description; the next
+call connects to a fresh episode. `describe_task` also checks for disconnection
+before returning a cached description. Initial connection failures remain MCP
+tool errors rather than claiming an episode was started.
 
 A coding agent's MCP configuration can use stdio (replace the absolute path):
 
@@ -112,11 +119,12 @@ volume for that path; do not expose it to the actor.
 
 ## Evidence and limits
 
-- 28 tests: the original 19 unchanged tests (including scripted solutions across
-  100 seeds and immutable trace snapshots) plus nine integration tests covering
+- 29 tests: the original 19 unchanged tests (including scripted solutions across
+  100 seeds and immutable trace snapshots) plus ten integration tests covering
   real subprocess/socket episodes, protocol probes, concurrent independence,
   operator seeds, private logs, defensive input/idle handling, SDK stdio and
-  streamable HTTP MCP, and hardened Docker TCP and MCP HTTP published-port solves.
+  streamable HTTP MCP, explicit controller disconnects, and hardened Docker TCP
+  and MCP HTTP published-port solves.
   MCP tests (including the Docker MCP subtest) skip without the SDK; Docker skips
   without a working daemon. Run `python3 -m unittest -v` for counts and skips.
 - Different valid action orders are accepted.
