@@ -4,6 +4,7 @@ import copy
 import random
 from collections import Counter
 
+import audit_variants
 from environment import FulfillmentEnv
 
 
@@ -196,13 +197,18 @@ def episode(seed, mode):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seeds", type=int, default=512)
+    parser.add_argument("--variant", choices=("base", "split", "duplicate", "stockout", "cancellation", "refund"), default="base")
+    parser.add_argument("--difficulty", choices=("easy", "medium", "hard", "extreme"), default="easy")
     args = parser.parse_args()
     if args.seeds < 1:
         parser.error("--seeds must be positive")
     for mode in ("random", "guided partial", "guided complete"):
         counts = Counter()
         for seed in range(args.seeds):
-            counts.update(episode(seed, mode))
+            if args.variant == "base" and args.difficulty == "easy":
+                counts.update(episode(seed, mode))
+            else:
+                counts.update(audit_variants.episode(seed, mode, args.variant, args.difficulty))
         print(f"{mode}: {args.seeds} episodes; "
               + ", ".join(f"{key}: {counts[key]}" for key in sorted(counts)))
 
