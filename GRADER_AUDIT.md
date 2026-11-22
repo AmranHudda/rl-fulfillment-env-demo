@@ -107,9 +107,11 @@ for variant in base split duplicate stockout cancellation refund; do
 done
 ```
 
-Mutation commands still exit 1 for documented survivors; do not mistake that
-for a successful zero-survivor run. Each baseline fixture suite passed before
-mutations. The fixtures use development seeds 7 and 11; no held-out seeds were
+Variant mutation commands now exit 0 if every surviving mutant has an exact
+documented tool-invariant equivalence proof; any unexpected survivor or failed
+baseline exits 1. They print caught, equivalent and unexpected counts separately,
+not a zero-survivor claim. The historical mutation command above did not have
+this allowlist. Fixtures use development seeds 7 and 11; no held-out seeds were
 used. `test_variant_audit.py` also exercises the independent oracle and the
 three sequence strategies for all four named difficulties.
 
@@ -174,46 +176,75 @@ count as detection, just as in PR #2. Known-field mutations, removed/extra
 records, coherent bad receipt/stock/allocation states, incomplete work and
 truncation are tested against the unmutated grader first.
 
-| Variant (medium) | Final-state fixtures | Caught / total | Survived |
-| --- | ---: | ---: | ---: |
-| base | 590 | 68/89 | 21 |
-| split | 790 | 82/89 | 7 |
-| duplicate | 626 | 68/89 | 21 |
-| stockout | 644 | 75/99 | 24 |
-| cancellation | 640 | 93/117 | 24 |
-| refund | 626 | 93/119 | 26 |
+#### Cross-variant follow-up
 
-All survivors are accounted for below; “equivalent” is relative to the given
-variant's controller facts and **one** mutation, not simultaneous deletion of
-redundant guards. Names refer to predicates, not unstable source line numbers.
+The original per-variant survivor classification was too narrow: a predicate
+unreachable in one variant can still be distinguished in another variant that
+uses the same mutated function. Every run now includes the unchanged base/easy
+and split/easy direct-state fixture suites, plus 24 tool-only trajectories:
+the correct solver and careless actor for all six variants at easy and hard.
+The oracle checks `grade()` after **every** tool call, including incomplete
+prefixes, rejected moves and otherwise-valid protected mutations. New reachable
+states are built entirely through the API; no controller setup or edited
+snapshots are needed for these witnesses.
 
-1. **All variants (two):** `oid in shipped -> False` and the later
-   `final is None -> False` are redundant for the receipt/existence reasons
-   given in the historical audit.
-2. **All non-split variants (19):** forcing the split-fact branch false (one)
-   or either constant in its allocation-only checks (18) cannot change
-   execution: that branch is unreachable in these variants. This plus (1)
-   explains all 21 base/duplicate survivors.
-3. **Split (five more):** forcing the split-fact branch true is equivalent to
-   its private constant. `not allocations -> False` is redundant with the
-   positive original quantity and allocation-sum check. The three individual
-   warehouse comparisons are redundant: both order/shipment warehouses must
-   be `None` and must equal each other, so dropping any one comparison leaves
-   the other two. Together with (1), these explain all seven split survivors.
-4. **Stockout (three more):** disabling the delegated base shipment-set check,
-   its eligibility operand, or its whole eligibility/uniqueness condition is
-   redundant here. The wrapper passes `eligible & shipped`, making that set
-   equality tautological; an ineligible shipment's final order cannot both
-   match the shipment and remain unchanged under protected-order checking.
-   Duplicate shipments still fail receipt consistency. The wrapper's optimum
-   and normal-order-completeness predicates are both detected.
-5. **Cancellation/refund (three more each):** the delegated order/ticket
-   population checks and early shipment missing-order check are redundant:
-   each wrapper already checks the full populations before delegation.
-6. **Refund (two more):** its wrapper ticket-population check is also
-   redundant with the delegated ticket-population check (single mutation).
-   Its refund-ledger length check is redundant because distinct ledger receipt
-   keys cannot both match one order's final receipt in the following loop.
+Eleven previously variant-local survivors have explicit reachable witnesses:
+forcing the split-fact branch either way (two mutants), and forcing each of
+the nine allocation predicates true. A completed base trajectory distinguishes
+the forced-true split branch; a completed split trajectory distinguishes the
+forced-false branch and the nine forced-true allocation checks. The regression
+test runs the actual mutants against these tool trajectories. Existing direct
+fixtures, retained rather than weakened, catch the remaining newly detected
+mutants (disabled allocation checks, normal shipment completeness/eligibility,
+population and early missing-order checks) across variants. These legacy
+synthetic fixtures are not claimed to be reachable tool states.
+
+| Variant (medium) | Before: caught / total; survivors | After: test cases | After: caught / total | Equivalent | Unexpected |
+| --- | --- | ---: | ---: | ---: | ---: |
+| base | 68/89; 21 | 954 | 84/89 | 5 | 0 |
+| split | 82/89; 7 | 1,154 | 84/89 | 5 | 0 |
+| duplicate | 68/89; 21 | 990 | 84/89 | 5 | 0 |
+| stockout | 75/99; 24 | 1,008 | 94/99 | 5 | 0 |
+| cancellation | 93/117; 24 | 1,004 | 112/117 | 5 | 0 |
+| refund | 93/119; 26 | 990 | 112/119 | 7 | 0 |
+
+Each medium run exits 0. The mutant catalog does not depend on difficulty:
+the same static `grade`, `_grade_base` and variant-grade function objects supply
+all predicates at easy/medium/hard/extreme and integer difficulties. A regression
+test checks those identities across configurations; there is no different
+easy/hard mutant set to enumerate. Reachable easy/hard witnesses are nevertheless
+included in every medium run. No real reachable hole in the original grader
+was found, so no grader logic was changed in this follow-up.
+
+#### Remaining equivalent mutants: tool-invariant proofs
+
+These seven allowlist entries apply across **all** variants, seeds and accepted
+difficulties, not just the variant used to print a report. They concern one
+predicate mutation at a time and reachable controller states. Induction starts
+from generated worlds; the listed tool preconditions preserve each invariant.
+Reads return copies, rejected mutations do not execute, and request-ID replay
+returns a cached result rather than repeating a transition. No actor tool can
+edit controller metadata or arbitrarily replace records.
+
+| Function / predicate forced false | Why no reachable state distinguishes it |
+| --- | --- |
+| `_grade_base`: `oid in shipped` | `ship` requires reserved status and makes it shipped; no tool reopens an order, and pre-shipped refund orders cannot reserve, so shipment order IDs are always unique. |
+| `_grade_base`: **later** `final is None` (occurrence 2) | No tool deletes orders or replaces a record with `None`, so every initial order always has a record. |
+| `_grade_base`: `not allocations` | Split `ship` requires allocations summing to a positive immutable order quantity; shipped allocations therefore cannot be empty, and non-split variants never evaluate this predicate. |
+| `_grade_base`: `final["warehouse"] is not None` | Split orders start with warehouse `None`; split reserve updates only allocations/status, ship preserves that warehouse, and no other split tool changes it. |
+| `_grade_base`: `shipment["warehouse"] is not None` | Split ship copies the order's invariant `None` warehouse; no tool subsequently modifies a shipment. |
+| `grade_refund`: `set(state["tickets"]) != set(initial["tickets"])` | No tool creates or deletes tickets, so their key sets cannot change. |
+| `grade_refund`: `len(state["refunds"]) != len(refunds)` | Refund requires shipped status and makes it refunded with no reopening transition, so the ledger is injective in order ID; whenever the preceding value-set equality passes, its cardinality must equal the eligible-refund set's cardinality. |
+
+The first five appear in all six runs; the last two additionally appear in
+refund. `audit_grade.EQUIVALENT_MUTANTS` stores exactly these reasons, keyed by
+function, predicate text, replacement constant and occurrence number. In
+particular, the early missing-order check is **not** allowlisted by accidentally
+matching the later predicate's text. New tests verify that distinction, exact
+allowlist coverage, exit 0 for a documented equivalent, and exit 1 for an
+undocumented survivor. An unrecognized surviving predicate is never silently
+accepted. Sampling the trajectories checks the proofs' premises but is not
+itself the proof of equivalence.
 
 These results are sampled evidence, not a proof of robustness against arbitrary
 malformed controller memory, multiple mutants, arbitrary policies, process

@@ -13,6 +13,35 @@ from audit_variants import suite
 from environment import FulfillmentEnv
 
 
+EQUIVALENT_MUTANTS = {
+    ("_grade_base", 1, "oid in shipped -> False"):
+        "ship requires reserved status and changes it to shipped; no tool reopens an order, so shipment order IDs are unique",
+    ("_grade_base", 2, "final is None -> False"):
+        "tools never delete orders or replace their records with None",
+    ("_grade_base", 1, "not allocations -> False"):
+        "split ship requires allocations summing to the positive order quantity, so shipped allocations cannot be empty",
+    ("_grade_base", 1, 'final["warehouse"] is not None -> False'):
+        "split orders start with warehouse None and no split tool changes it",
+    ("_grade_base", 1, 'shipment["warehouse"] is not None -> False'):
+        "split ship copies the order warehouse, which is always None",
+    ("grade_refund", 1, 'set(state["tickets"]) != set(initial["tickets"]) -> False'):
+        "no tool creates or deletes tickets; ticket key sets never change",
+    ("grade_refund", 1, 'len(state["refunds"]) != len(refunds) -> False'):
+        "refund allows one entry per order; after the preceding set-equality check, ledger cardinality must equal eligible-refund cardinality",
+}
+
+
+def equivalent_reason(name, original, description):
+    location, _, mutation = description.partition(" ")
+    expression = mutation.rsplit(" -> ", 1)[0]
+    source = textwrap.dedent(inspect.getsource(original))
+    matches = [predicate for predicate in predicates(ast.parse(source))
+               if " ".join(ast.get_source_segment(source, predicate).split()) == expression]
+    occurrence = next((index for index, predicate in enumerate(matches, 1)
+                       if f"L{predicate.lineno}" == location), None)
+    return EQUIVALENT_MUTANTS.get((name, occurrence, mutation))
+
+
 def predicates(tree):
     for node in ast.walk(tree):
         if isinstance(node, ast.If):
@@ -58,7 +87,7 @@ def main():
     def run():
         loader = unittest.TestLoader()
         if args.variant:
-            tests = suite(args.variant, args.difficulty)
+            tests = suite(args.variant, args.difficulty, cross_variant=True)
         else:
             tests = (loader.loadTestsFromName("test_environment") if args.original_tests
                      else loader.discover(".", pattern="test*.py"))
@@ -71,6 +100,7 @@ def main():
         return 1
 
     survivors = []
+    equivalents = []
     total = 0
     targets = [(FulfillmentEnv, "grade")]
     if args.variant:
@@ -78,15 +108,28 @@ def main():
         if args.variant in ("stockout", "cancellation", "refund"):
             targets.append((environment, "grade_" + args.variant))
     for owner, name in targets:
-        for description, mutated in mutants(getattr(owner, name)):
+        original = getattr(owner, name)
+        for description, mutated in mutants(original):
             total += 1
             with patch.object(owner, name, mutated):
                 if run().wasSuccessful():
-                    survivors.append((name + ": " if args.variant else "") + description)
+                    label = (name + ": " if args.variant else "") + description
+                    reason = equivalent_reason(name, original, description) if args.variant else None
+                    if reason is None:
+                        survivors.append(label)
+                    else:
+                        equivalents.append((label, reason))
+    for description, reason in equivalents:
+        print(f"EQUIVALENT: {description}; {reason}")
     for description in survivors:
         print(f"SURVIVED: {description}")
-    print(f"{baseline.testsRun} tests; {total - len(survivors)}/{total} mutants caught; "
-          f"{len(survivors)} survived")
+    caught = total - len(survivors) - len(equivalents)
+    if args.variant:
+        print(f"{baseline.testsRun} tests; {caught}/{total} mutants caught; "
+              f"{len(equivalents)} equivalent; {len(survivors)} unexpected survivors")
+    else:
+        print(f"{baseline.testsRun} tests; {caught}/{total} mutants caught; "
+              f"{len(survivors)} survived")
     return bool(survivors)
 
 

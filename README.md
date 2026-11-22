@@ -88,7 +88,7 @@ tuning uses held-out seeds; the constants do not enforce access restrictions.
 
 ## Evidence and limits
 
-- 90 tests: 19 original tests and 19 PR #2 audit tests unchanged, plus 52 variant
+- 96 tests: 19 original tests and 19 PR #2 audit tests unchanged, plus 58 variant
   and integration tests.
 - Each of the six variants has a scripted solver earning reward 1 on 100 dev
   seeds at every named difficulty and under alternative action orders, plus at
@@ -101,9 +101,12 @@ tuning uses held-out seeds; the constants do not enforce access restrictions.
   historical base-only findings and records the all-six-variant extension.
   Each variant was sequence-audited on 512 dev seeds at easy and hard
   (three strategies per seed), without a reward/oracle disagreement. Medium
-  final-state fixtures detect base 68/89, split 82/89, duplicate 68/89,
-  stockout 75/99, cancellation 93/117 and refund 93/119 predicate mutants;
-  remaining mutations are variant-unreachable or redundant as detailed there.
+  audits, now including cross-variant reachable trajectories, detect base
+  84/89, split 84/89, duplicate 84/89, stockout 94/99, cancellation 112/117 and
+  refund 112/119 predicate mutants. Only five shared and two refund-specific
+  mutants remain, each with a tool-invariant equivalence proof in that report;
+  variant-local unreachability alone is not accepted. Audits exit 0 only when
+  every survivor matches the exact documented equivalence allowlist.
   These are finite samples and single-predicate mutations, not a proof.
   Rejected-request binding and missing shipped orders are tested across all
   variants. Reward depends on final state, not reads.

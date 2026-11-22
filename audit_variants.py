@@ -7,7 +7,7 @@ from collections import Counter
 
 import audit_sequences
 from environment import FulfillmentEnv
-from solvers import (_solve, solve_base, solve_split, solve_duplicate, solve_stockout,
+from solvers import (_solve, careless_actor, solve_base, solve_split, solve_duplicate, solve_stockout,
                      solve_cancellation, solve_refund)
 
 SOLVERS = dict(base=solve_base, split=solve_split, duplicate=solve_duplicate,
@@ -333,5 +333,43 @@ class FinalStateCase(unittest.TestCase):
         self.assertEqual(self.env.grade(), self.expected, self.description)
 
 
-def suite(variant, difficulty):
-    return unittest.TestSuite(FinalStateCase(*case) for case in fixtures(variant, difficulty))
+class ReachableStatesCase(unittest.TestCase):
+    def __init__(self, variant, difficulty, careless=False):
+        super().__init__()
+        self.variant, self.difficulty, self.careless = variant, difficulty, careless
+
+    def shortDescription(self):
+        return f"reachable {self.variant}/{self.difficulty}, careless={self.careless}"
+
+    def runTest(self):
+        env = FulfillmentEnv(7, variant=self.variant, difficulty=self.difficulty)
+        initial = env.snapshot
+        case = self
+
+        class Actor:
+            def step(self, action):
+                result = env.step(action)
+                expected = not env._truncated and complete(case.variant, initial, env.snapshot)
+                case.assertEqual(env.grade(), expected, repr(action))
+                return result
+
+        if self.careless:
+            careless_actor(Actor())
+        else:
+            SOLVERS[self.variant](Actor(), finish=False)
+
+
+def reachable_suite():
+    return unittest.TestSuite(ReachableStatesCase(variant, difficulty, careless)
+                              for variant in SOLVERS
+                              for difficulty in ("easy", "hard")
+                              for careless in (False, True))
+
+
+def suite(variant, difficulty, *, cross_variant=False):
+    tests = unittest.TestSuite(FinalStateCase(*case) for case in fixtures(variant, difficulty))
+    if cross_variant:
+        tests.addTests(reachable_suite())
+        for shared_variant in ("base", "split"):
+            tests.addTests(FinalStateCase(*case) for case in fixtures(shared_variant, "easy"))
+    return tests
