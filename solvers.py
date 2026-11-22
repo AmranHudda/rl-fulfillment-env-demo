@@ -19,6 +19,40 @@ def solve_stockout(env, *, reverse=False, shuffle_seed=None, finish=True):
     return _solve(env, reverse=reverse, shuffle_seed=shuffle_seed, finish=finish, stockout=True)
 
 
+def _caller(env, prefix, *, ignore_errors=False):
+    count = 0
+    def call(name, args=None):
+        nonlocal count
+        request = dict(tool=name, args=args or {}, request_id="%s-%s" % (prefix, count))
+        count += 1
+        result = env.step(request)
+        if not ignore_errors and "error" in result:
+            raise RuntimeError(result["error"])
+        return result
+    return call
+
+
+def careless_actor(env):
+    call = _caller(env, "careless", ignore_errors=True)
+    tickets = call("list_tickets").get("observation", {})
+    inventory = call("inventory").get("observation", {})
+    for tid, ticket in tickets.items():
+        oid = ticket["order_id"]
+        order = call("get_order", dict(order_id=oid)).get("observation", {})
+        for warehouse in inventory:
+            args = dict(order_id=oid, warehouse=warehouse)
+            if "allocations" in order:
+                args["qty"] = str(order["qty"])
+            call("reserve", args)
+        receipt = None
+        for name in ("ship", "refund", "cancel_order"):
+            result = call(name, dict(order_id=oid))
+            receipt = result.get("observation", {}).get("receipt", receipt)
+        if receipt:
+            call("close_ticket", dict(ticket_id=tid, receipt=receipt))
+    return call("finish")
+
+
 def solve_refund(env, *, reverse=False, shuffle_seed=None, finish=True):
     return _solve(env, reverse=reverse, shuffle_seed=shuffle_seed, finish=finish, refund=True)
 

@@ -2,7 +2,7 @@ import unittest
 
 from environment import DEV_SEEDS, HELDOUT_SEEDS, DIFFICULTIES, VARIANTS, FulfillmentEnv
 from solvers import (solve_base, solve_split, solve_duplicate, solve_stockout,
-                     solve_cancellation, solve_refund)
+                     solve_cancellation, solve_refund, careless_actor)
 
 
 class VariantTests(unittest.TestCase):
@@ -138,6 +138,42 @@ def tool(env, name, args=None, key=None):
     return env.step(request)
 
 
+class CarelessActorTests(unittest.TestCase):
+    def test_careless_actor_fails_all_new_variants(self):
+        for variant in ("split", "duplicate", "stockout", "cancellation", "refund"):
+            for difficulty in ("easy", "hard"):
+                rewards = []
+                for seed in range(100):
+                    result = careless_actor(FulfillmentEnv(seed, variant=variant, difficulty=difficulty))
+                    rewards.append(result["reward"])
+                self.assertEqual(sum(rewards), 0, (variant, difficulty, rewards))
+
+    def test_valid_protected_mutations_are_executable_but_grade_zero(self):
+        for variant in ("split", "duplicate", "stockout", "cancellation", "refund"):
+            for unrelated in (False, True):
+                with self.subTest(variant=variant, unrelated=unrelated):
+                    env = FulfillmentEnv(7, variant=variant, difficulty="medium")
+                    state = env.snapshot
+                    related = {t["order_id"] for t in state["tickets"].values()}
+                    oid = next(oid for oid, o in state["orders"].items()
+                               if (oid not in related if unrelated else o["needs_review"]))
+                    order = state["orders"][oid]
+                    if order["status"] == "shipped":
+                        self.assertNotIn("error", tool(env, "refund", dict(order_id=oid), "bad"))
+                    else:
+                        warehouse = next(w for w, stock in state["inventory"].items()
+                                         if stock.get(order["sku"], 0) >= order["qty"])
+                        args = dict(order_id=oid, warehouse=warehouse)
+                        if variant == "split":
+                            args["qty"] = str(order["qty"])
+                        self.assertNotIn("error", tool(env, "reserve", args, "bad"))
+                        receipt = tool(env, "ship", dict(order_id=oid), "ship")["observation"]["receipt"]
+                        for tid, ticket in state["tickets"].items():
+                            if ticket["order_id"] == oid:
+                                self.assertNotIn("error", tool(env, "close_ticket", dict(ticket_id=tid, receipt=receipt), tid))
+                    self.assertEqual(tool(env, "finish")["reward"], 0)
+
+
 def check_variant_solutions(test, variant, solver):
     for difficulty in DIFFICULTIES:
         for seed in range(100):
@@ -241,12 +277,11 @@ class SplitTests(unittest.TestCase):
         solve_split(self.env, finish=False)
         for oid in self.env._state["orders"]:
             if oid not in self.env._eligible:
-                before = self.env.snapshot
-                self.assertIn("error", tool(self.env, "reserve", dict(
-                    order_id=oid, warehouse="north", qty="1"), "protected"))
-                self.assertEqual(before, self.env.snapshot)
-        review = next(o for o in self.env._state["orders"].values() if o["needs_review"])
-        review["allocations"]["north"] = 1
+                sku = self.env.snapshot["orders"][oid]["sku"]
+                warehouse = next(w for w, stock in self.env.snapshot["inventory"].items() if stock[sku])
+                self.assertNotIn("error", tool(self.env, "reserve", dict(
+                    order_id=oid, warehouse=warehouse, qty="1"), "protected-" + oid))
+                self.assertFalse(self.env.grade())
         self.assertEqual(tool(self.env, "finish")["reward"], 0)
 
 
