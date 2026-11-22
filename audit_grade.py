@@ -8,6 +8,8 @@ import textwrap
 import unittest
 from unittest.mock import patch
 
+import environment
+from audit_variants import suite
 from environment import FulfillmentEnv
 
 
@@ -43,19 +45,24 @@ def mutants(original):
             altered = ast.fix_missing_locations(Replace().visit(altered))
             namespace = {}
             exec(compile(altered, "<grade mutant>", "exec"), original.__globals__, namespace)
-            yield f"L{predicate.lineno} {expression} -> {value}", namespace["grade"]
+            yield f"L{predicate.lineno} {expression} -> {value}", namespace[original.__name__]
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--original-tests", action="store_true")
+    parser.add_argument("--variant", choices=("base", "split", "duplicate", "stockout", "cancellation", "refund"))
+    parser.add_argument("--difficulty", choices=("easy", "medium", "hard", "extreme"), default="easy")
     args = parser.parse_args()
 
     def run():
         loader = unittest.TestLoader()
-        suite = (loader.loadTestsFromName("test_environment") if args.original_tests
-                 else loader.discover(".", pattern="test*.py"))
-        return unittest.TextTestRunner(stream=io.StringIO()).run(suite)
+        if args.variant:
+            tests = suite(args.variant, args.difficulty)
+        else:
+            tests = (loader.loadTestsFromName("test_environment") if args.original_tests
+                     else loader.discover(".", pattern="test*.py"))
+        return unittest.TextTestRunner(stream=io.StringIO()).run(tests)
 
     baseline = run()
     if not baseline.wasSuccessful():
@@ -65,11 +72,17 @@ def main():
 
     survivors = []
     total = 0
-    for description, mutated in mutants(FulfillmentEnv.grade):
-        total += 1
-        with patch.object(FulfillmentEnv, "grade", mutated):
-            if run().wasSuccessful():
-                survivors.append(description)
+    targets = [(FulfillmentEnv, "grade")]
+    if args.variant:
+        targets.append((FulfillmentEnv, "_grade_base"))
+        if args.variant in ("stockout", "cancellation", "refund"):
+            targets.append((environment, "grade_" + args.variant))
+    for owner, name in targets:
+        for description, mutated in mutants(getattr(owner, name)):
+            total += 1
+            with patch.object(owner, name, mutated):
+                if run().wasSuccessful():
+                    survivors.append((name + ": " if args.variant else "") + description)
     for description in survivors:
         print(f"SURVIVED: {description}")
     print(f"{baseline.testsRun} tests; {total - len(survivors)}/{total} mutants caught; "

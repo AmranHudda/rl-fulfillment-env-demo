@@ -51,13 +51,17 @@ Defaults preserve the legacy base/easy world and observations.
 | `base` | Fulfillment and protected state | Eligible orders shipped; tickets closed with real receipts | None |
 | `split` | Multi-warehouse allocations | Full allocations shipped; stock reconciled | `reserve` adds decimal-string `qty` |
 | `duplicate` | Multiple tickets per order | Ship once; close every ticket with the same receipt | None |
-| `stockout` | Limited-stock completion | Exactly one short-SKU order and ticket untouched; all other eligible work complete | None |
+| `stockout` | Optimal unsplit allocation | Maximum short-SKU units shipped across two warehouses; unfulfilled orders/tickets untouched; no dangling reservations | None |
 | `cancellation` | Mid-episode changes | Requested order cancelled, stock released, ticket closed; remaining eligible work complete | `cancel_order` |
 | `refund` | Refund routing and review protection | Non-review refund tickets refunded and closed; fulfillment complete; protected orders unchanged | `refund` |
 
 All variants require exact stock reconciliation and protect review/unrelated
-state. Refunds do not restock inventory; refunding a protected order is
-deliberately allowed by the tool but fails grading. Cancellation events arrive
+state in the grader. Base tools reject protected mutations; the five other
+variants deliberately allow them when otherwise valid, then grade the episode
+0. Unknown IDs, insufficient stock, wrong statuses, fake receipts and request-ID
+conflicts are still rejected. Refunds do not restock inventory. Stockout uses
+mixed quantities and two warehouses: sorted, reversed and smallest-first greedy
+allocation strand stock; its solver plans from observations. Cancellation events arrive
 before an action at a seeded step from 4 through
 `max(5, (3 + tickets + 3 * eligible_orders) // 3)`; reserve/ship then refuse the
 requested order. Close cancellation/refund tickets with their real operation
@@ -84,7 +88,7 @@ tuning uses held-out seeds; the constants do not enforce access restrictions.
 
 ## Evidence and limits
 
-- 83 tests: 19 original tests and 19 PR #2 audit tests unchanged, plus 45 variant
+- 90 tests: 19 original tests and 19 PR #2 audit tests unchanged, plus 52 variant
   and integration tests.
 - Each of the six variants has a scripted solver earning reward 1 on 100 dev
   seeds at every named difficulty and under alternative action orders, plus at
@@ -93,14 +97,19 @@ tuning uses held-out seeds; the constants do not enforce access restrictions.
   episode.
 - Worlds are solvable by construction. The scripted solvers know the rules:
   these checks show solvability and rejection of the listed failures, not an
-  unbreakable grader. The [base-task audit](GRADER_AUDIT.md) sampled 1,536
-  episodes without a false positive or protected-state change and detected
-  65/67 predicate mutants (two redundant survivors). These historical audit
-  results cover base only, not the variants. After the refactor, the unchanged
-  sequence audit reproduces its base results; the unchanged mutation script
-  catches 4/4 mutations of the thin grade-dispatch wrapper, not its delegated
-  predicates. The merged suite also checks rejected-request binding and missing
-  shipped orders across all variants. Reward depends on final state, not reads.
+  unbreakable grader. The [audit report](GRADER_AUDIT.md) preserves PR #2's
+  historical base-only findings and records the all-six-variant extension.
+  Each variant was sequence-audited on 512 dev seeds at easy and hard
+  (three strategies per seed), without a reward/oracle disagreement. Medium
+  final-state fixtures detect base 68/89, split 82/89, duplicate 68/89,
+  stockout 75/99, cancellation 93/117 and refund 93/119 predicate mutants;
+  remaining mutations are variant-unreachable or redundant as detailed there.
+  These are finite samples and single-predicate mutations, not a proof.
+  Rejected-request binding and missing shipped orders are tested across all
+  variants. Reward depends on final state, not reads.
+- The tool-only careless actor scores reward 1 in 0/100 dev-seed episodes for
+  each non-base variant at both easy and hard (0/1,000 total). This rejects that
+  particular error-ignoring policy, not every possible shortcut.
 - Negative cases include fabricated receipts, missing/dangling reservations,
   protected orders, malformed requests, mutation replay, reset, exhausted step
   budgets and false completion claims. Trace snapshots retain past observations.
