@@ -118,15 +118,17 @@ for runtime temporary files. Integration tests use these same flags and solve
 through both published ports, including the SDK's streamable HTTP client on 8000.
 If logging is enabled with `--log`, provision a separate controller-only writable
 volume for that path; do not expose it to the actor.
+The entrypoint stops both servers if either exits, and exits nonzero when a child
+fails so startup failures are visible to container tooling.
 
 ## Evidence and limits
 
-- 30 tests: the original 19 unchanged tests (including scripted solutions across
-  100 seeds and immutable trace snapshots) plus eleven integration tests covering
+- 31 tests: the original 19 unchanged tests (including scripted solutions across
+  100 seeds and immutable trace snapshots) plus twelve integration tests covering
   real subprocess/socket episodes, protocol probes, concurrent independence,
   operator seeds, private logs, defensive input/idle handling, SDK stdio and
   streamable HTTP MCP, explicit controller disconnects, and hardened Docker TCP
-  and MCP HTTP published-port solves.
+  and MCP HTTP published-port solves, strict JSON logs and entrypoint failures.
   MCP tests (including the Docker MCP subtest) skip without the SDK; Docker skips
   without a working daemon. Run `python3 -m unittest -v` for counts and skips.
 - Different valid action orders are accepted.

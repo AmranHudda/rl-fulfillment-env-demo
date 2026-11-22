@@ -354,6 +354,17 @@ class MCPTests(unittest.TestCase):
             asyncio.run(run(port))
 
 
+class EntrypointTests(unittest.TestCase):
+    def test_controller_startup_failure_exits_nonzero(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log_path = str(Path(directory) / "missing" / "episodes.jsonl")
+            result = subprocess.run([sys.executable, str(ROOT / "container_entrypoint.py"),
+                "--port", str(free_port()), "--log", log_path], cwd=ROOT,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(log_path, result.stderr)
+
+
 def docker_works():
     if not shutil.which("docker"):
         return False
