@@ -93,15 +93,15 @@ configuration (for clients supporting URL configuration:
 ```sh
 docker build -t fulfillment-controller .
 docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges \
-  --tmpfs /tmp -p 7000:7000 -p 8000:8000 fulfillment-controller --seed 7
+  --tmpfs /tmp -p 127.0.0.1:7000:7000 -p 127.0.0.1:8000:8000 fulfillment-controller --seed 7
 ```
 
 The slim Python image runs as a non-root user and supervises both the controller
 on 7000 and the MCP HTTP bridge on 8000, bound to `0.0.0.0` inside the container.
 Give the actor only the TCP port or MCP URL, not a shell, Docker socket, shared
-filesystem mounts or controller logs. Prefer `-p 127.0.0.1:7000:7000` and
-`-p 127.0.0.1:8000:8000` if remote access is unnecessary: the shorter commands
-above publish on all host interfaces. Container arguments are controller options;
+filesystem mounts or controller logs. The command publishes only on loopback.
+Publishing more widely lets any network peer act on and end the shared MCP
+episode: there is no authentication. Container arguments are controller options;
 keep its port at 7000 because the bridge uses that internal port.
 The recommended hardening flags make the root filesystem read-only, drop Linux
 capabilities and prevent privilege escalation; `/tmp` remains writable in memory
