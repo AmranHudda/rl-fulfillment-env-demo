@@ -60,8 +60,11 @@ connection closes; idle connections close after 60 seconds (`--idle-timeout`).
 Non-standard JSON constants (`NaN`, `Infinity`) and numeric float overflow are
 also rejected as invalid JSON, keeping controller logs strict JSON.
 Only the operator chooses seeds; there is no seed/reset tool. Optional JSONL
-logs contain seed, attempt, steps, reward and final snapshot, stay on the controller side,
+logs contain seed, attempt, steps, invalid_lines, reward and final snapshot, stay on the controller side,
 and must not be mounted or otherwise made accessible to an actor.
+Invalid JSON lines are counted in `invalid_lines`, not retained individually in
+memory or the log. They still consume the seed on first receipt, and the
+connection remains usable for subsequent requests.
 
 `--each-seed-once` works with either `--seed` or `--seeds`: each seed is played at
 most once per controller run. A connection reserves a seed before the initial
@@ -145,8 +148,8 @@ SIGTERM/SIGINT shutdown exits zero; forwarded shutdown signals are not failures.
 
 ## Evidence and limits
 
-- 57 tests: the original 19 unchanged tests (including scripted solutions across
-  100 seeds and immutable trace snapshots), 19 grader-audit tests, and nineteen
+- 58 tests: the original 19 unchanged tests (including scripted solutions across
+  100 seeds and immutable trace snapshots), 19 grader-audit tests, and twenty
   isolation integration tests covering
   real subprocess/socket episodes, protocol probes, concurrent independence,
   operator seeds, private logs, defensive input/idle handling, SDK stdio and

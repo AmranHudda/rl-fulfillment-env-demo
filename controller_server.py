@@ -103,6 +103,7 @@ class Episode(socketserver.StreamRequestHandler):
         index, seed = reservation
         env = FulfillmentEnv(seed)
         steps = []
+        invalid_lines = 0
         reward = 0
         attempt = None
         try:
@@ -123,7 +124,7 @@ class Episode(socketserver.StreamRequestHandler):
                                          parse_float=finite_float)
                 except (ValueError, UnicodeDecodeError):
                     response = {"error": "Invalid JSON", "reward": 0}
-                    steps.append({"request": None, "response": response})
+                    invalid_lines += 1
                     send(response)
                     continue
                 response = env.step(request)
@@ -140,6 +141,7 @@ class Episode(socketserver.StreamRequestHandler):
                     server.released.appendleft(index)
                 elif server.log:
                     server.log.write(json.dumps({"seed": seed, "attempt": attempt, "steps": steps,
+                                                 "invalid_lines": invalid_lines,
                                                  "reward": reward,
                                                  "final_snapshot": env.snapshot}) + "\n")
                     server.log.flush()

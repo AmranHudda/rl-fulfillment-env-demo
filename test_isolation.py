@@ -248,7 +248,9 @@ class IsolationTests(unittest.TestCase):
             self.assertEqual([(log["seed"], log["attempt"], log["reward"]) for log in logs],
                              [(7, 1, 1), (7, 2, 0)])
             episode = logs[0]
-            self.assertEqual(set(episode), {"seed", "attempt", "steps", "reward", "final_snapshot"})
+            self.assertEqual(set(episode), {"seed", "attempt", "steps", "invalid_lines",
+                                           "reward", "final_snapshot"})
+            self.assertEqual(episode["invalid_lines"], 0)
             hidden = set(episode["final_snapshot"]["orders"]) - {
                 t["order_id"] for t in episode["final_snapshot"]["tickets"].values()}
             self.assertTrue(hidden)
@@ -283,10 +285,39 @@ class IsolationTests(unittest.TestCase):
                     for line in path.read_text().splitlines()]
             self.assertEqual(len(logs), 1)
             episode = logs[0]
-            self.assertEqual(len(episode["steps"]), 7)
+            self.assertEqual(len(episode["steps"]), 2)
+            self.assertEqual(episode["invalid_lines"], 5)
             self.assertEqual([step["request"]["tool"] for step in episode["steps"]
                               if step["request"] is not None],
                              ["inventory", "finish"])
+
+    def test_many_invalid_lines_keep_log_bounded_and_consume_seed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "episodes.jsonl"
+            with controller("--seed", "7", "--each-seed-once", "--log", str(path)) as port:
+                actor = Actor(port)
+                try:
+                    for _ in range(1000):
+                        self.assertEqual(actor.raw(b"garbage\n"),
+                                         {"error": "Invalid JSON", "reward": 0})
+                    self.assertEqual(actor.call("finish")["reward"], 0)
+                    self.assertEqual(actor.stream.readline(), b"")
+                finally:
+                    actor.close()
+                refused = Actor(port)
+                try:
+                    self.assertEqual(refused.description["error"], "No seeds remaining")
+                    self.assertEqual(refused.stream.readline(), b"")
+                finally:
+                    refused.close()
+            raw = path.read_text()
+            self.assertLess(len(raw), 4096)
+            logs = [json.loads(line) for line in raw.splitlines()]
+            self.assertEqual(len(logs), 1)
+            self.assertEqual(logs[0]["invalid_lines"], 1000)
+            self.assertEqual((logs[0]["seed"], logs[0]["attempt"], logs[0]["reward"]), (7, 1, 0))
+            self.assertEqual(len(logs[0]["steps"]), 1)
+            self.assertEqual(logs[0]["steps"][0]["request"]["tool"], "finish")
 
 
 class SeedAllocationTests(unittest.TestCase):
