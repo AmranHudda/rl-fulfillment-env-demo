@@ -84,7 +84,8 @@ tuning uses held-out seeds; the constants do not enforce access restrictions.
 
 ## Evidence and limits
 
-- 60 tests: 19 original tests unchanged plus 41 new tests.
+- 83 tests: 19 original tests and 19 PR #2 audit tests unchanged, plus 45 variant
+  and integration tests.
 - Each of the six variants has a scripted solver earning reward 1 on 100 dev
   seeds at every named difficulty and under alternative action orders, plus at
   least three grader-must-catch failure cases. Split also tests both warehouse
@@ -92,7 +93,14 @@ tuning uses held-out seeds; the constants do not enforce access restrictions.
   episode.
 - Worlds are solvable by construction. The scripted solvers know the rules:
   these checks show solvability and rejection of the listed failures, not an
-  unbreakable grader. No adversarial search or mutation testing has been done.
+  unbreakable grader. The [base-task audit](GRADER_AUDIT.md) sampled 1,536
+  episodes without a false positive or protected-state change and detected
+  65/67 predicate mutants (two redundant survivors). These historical audit
+  results cover base only, not the variants. After the refactor, the unchanged
+  sequence audit reproduces its base results; the unchanged mutation script
+  catches 4/4 mutations of the thin grade-dispatch wrapper, not its delegated
+  predicates. The merged suite also checks rejected-request binding and missing
+  shipped orders across all variants. Reward depends on final state, not reads.
 - Negative cases include fabricated receipts, missing/dangling reservations,
   protected orders, malformed requests, mutation replay, reset, exhausted step
   budgets and false completion claims. Trace snapshots retain past observations.

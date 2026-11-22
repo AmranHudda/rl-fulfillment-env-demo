@@ -6,6 +6,39 @@ from solvers import (solve_base, solve_split, solve_duplicate, solve_stockout,
 
 
 class VariantTests(unittest.TestCase):
+    def test_rejected_mutations_bind_ids_for_every_variant(self):
+        for variant in VARIANTS:
+            with self.subTest(variant=variant):
+                env = FulfillmentEnv(7, variant=variant)
+                state = env.snapshot
+                oid = next(oid for oid in sorted(env._eligible)
+                           if state["orders"][oid]["status"] == "open")
+                args = dict(order_id=oid)
+                failure = tool(env, "ship", args, "early")
+                self.assertIn("error", failure)
+                order = state["orders"][oid]
+                warehouse = next(w for w, stock in state["inventory"].items()
+                                 if stock.get(order["sku"], 0) > 0)
+                reserve = dict(args, warehouse=warehouse)
+                if variant == "split":
+                    reserve["qty"] = "1"
+                self.assertNotIn("error", tool(env, "reserve", reserve, "reserve"))
+                before = env.snapshot
+                self.assertEqual(tool(env, "ship", args, "early"), failure)
+                self.assertEqual(env.snapshot, before)
+                self.assertIn("already bound", tool(env, "reserve", reserve, "early")["error"])
+
+    def test_missing_shipped_orders_grade_false_for_every_variant(self):
+        solvers = dict(base=solve_base, split=solve_split, duplicate=solve_duplicate,
+                       stockout=solve_stockout, cancellation=solve_cancellation, refund=solve_refund)
+        for variant, solver in solvers.items():
+            with self.subTest(variant=variant):
+                env = FulfillmentEnv(7, variant=variant)
+                self.assertEqual(solver(env)["reward"], 1)
+                oid = next(iter(env.snapshot["shipments"].values()))["order_id"]
+                del env._state["orders"][oid]
+                self.assertFalse(env.grade())
+
     def test_solutions_across_dev_seeds_and_action_orders(self):
         for difficulty in DIFFICULTIES:
             for seed in range(100):
