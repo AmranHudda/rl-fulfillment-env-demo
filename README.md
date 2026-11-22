@@ -35,19 +35,21 @@ and tools. Send requests such as:
 
 Mutations require a `request_id`. Once a well-formed mutation is attempted,
 its ID is bound to the payload and its result, including a rejection by the
-tool. Reusing the ID with the same request returns that result without
-repeating the mutation; using it with another payload is rejected. To retry a
-rejected mutation after the world changes, use a new ID. `finish` ends the
-episode and returns the state-based reward.
+tool. Reusing the ID with the same request reports the prior outcome without
+repeating the mutation; using it with another payload is rejected. A replayed
+rejection identifies itself as a replay, includes the original error and tells
+the actor to use a new `request_id` to retry. `finish` ends the episode and
+returns the state-based reward.
 
 ## Evidence and limits
 
-- 38 tests, including the 19 unchanged original tests with scripted solutions
+- 39 tests, including the 19 unchanged original tests with scripted solutions
   across 100 seeds and immutable trace snapshots.
 - Different valid action orders are accepted.
 - Negative cases cover fabricated receipts, missing reservations, protected
   orders, malformed requests, mutation replay, reset, exhausted step budgets and
-  false completion claims.
+  false completion claims. Tests check that replayed rejections explain how to
+  retry and that reset describes the request ID rule.
 - The [grader audit](GRADER_AUDIT.md) found no false positive or protected-state
   change in 1,536 sampled episodes. It fixed rejected-mutation replay and a
   controller-side error on a missing order. Tests detected 65 of 67 single
