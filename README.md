@@ -33,18 +33,27 @@ and tools. Send requests such as:
 {"tool":"list_tickets","args":{}}
 ```
 
-Mutations require a `request_id`. Reusing it with the same request returns the
-same result without repeating the mutation. Reusing it with another payload is
-rejected. `finish` ends the episode and returns the state-based reward.
+Mutations require a `request_id`. Once a well-formed mutation is attempted,
+its ID is bound to the payload and its result, including a rejection by the
+tool. Reusing the ID with the same request returns that result without
+repeating the mutation; using it with another payload is rejected. To retry a
+rejected mutation after the world changes, use a new ID. `finish` ends the
+episode and returns the state-based reward.
 
 ## Evidence and limits
 
-- 19 tests, including scripted solutions across 100 seeds and immutable trace
-  snapshots.
+- 38 tests, including the 19 unchanged original tests with scripted solutions
+  across 100 seeds and immutable trace snapshots.
 - Different valid action orders are accepted.
 - Negative cases cover fabricated receipts, missing reservations, protected
   orders, malformed requests, mutation replay, reset, exhausted step budgets and
   false completion claims.
+- The [grader audit](GRADER_AUDIT.md) found no false positive or protected-state
+  change in 1,536 sampled episodes. It fixed rejected-mutation replay and a
+  controller-side error on a missing order. Tests detected 65 of 67 single
+  condition mutants; the other two are redundant with intact checks. This is
+  not exhaustive and does not verify whether the actor reads order or stock
+  before acting: the reward checks the final state, not the action history.
 - `demo.py` prints tool transcripts from a scripted baseline and a negative
   control. These are explicitly not LLM or trained-policy rollouts.
 - Actors are assumed to have only the listed tool API. Arbitrary code execution
