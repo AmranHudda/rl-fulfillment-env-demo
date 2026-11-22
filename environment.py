@@ -453,7 +453,9 @@ def generate_stockout(env, seed, count):
     spec["facts"]["optimum"] = optimum(0, 3 * scale, 3 * scale)
     spec["grade"] = grade_stockout
     spec["task"] = ("Ship as many units as possible of the limited-pin SKU; each order must ship "
-                    "from one warehouse, never split. Fulfill all other non-review tickets. Leave "
+                    "from one warehouse, never split. Fulfill all other non-review tickets. Close "
+                    "the ticket of every order you ship, including limited-pin orders, with its "
+                    "shipment receipt. Leave "
                     "unfulfilled orders completely untouched and their tickets open. Never leave "
                     "reservations unshipped. Leave review and unrelated state unchanged.")
     return spec
