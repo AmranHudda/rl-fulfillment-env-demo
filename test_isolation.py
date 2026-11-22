@@ -83,6 +83,41 @@ def socket_solve(actor):
     return asyncio.run(solve(call))
 
 
+async def http_solve(test, port):
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamablehttp_client
+
+    async with streamablehttp_client("http://127.0.0.1:%s/mcp" % port) as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            test.assertEqual({tool.name for tool in (await session.list_tools()).tools}, TOOLS)
+
+            async def call(tool, args=None, key=None):
+                arguments = dict(args or {})
+                if key is not None:
+                    arguments["request_id"] = key
+                result = await session.call_tool(tool, arguments)
+                test.assertFalse(result.isError, result)
+                return json.loads(result.content[0].text)
+
+            test.assertEqual(set(await call("describe_task")), {"task", "tools", "max_steps"})
+            test.assertEqual((await solve(call))["reward"], 1)
+            test.assertEqual((await call("finish"))["reward"], 0)
+
+
+def wait_http_ready(port, running):
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        if not running():
+            raise RuntimeError("HTTP server exited")
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=1):
+                return
+        except OSError:
+            time.sleep(0.05)
+    raise TimeoutError("HTTP server did not listen")
+
+
 def wait_ready(port, process):
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline:
@@ -212,6 +247,24 @@ class IsolationTests(unittest.TestCase):
 
 @unittest.skipUnless(importlib.util.find_spec("mcp"), "mcp SDK not installed")
 class MCPTests(unittest.TestCase):
+    def test_sdk_http_tools_and_solve(self):
+        with controller("--seed", "7") as port:
+            http_port = free_port()
+            process = subprocess.Popen([sys.executable, str(ROOT / "mcp_server.py"),
+                "--controller", "127.0.0.1:%s" % port, "--transport", "http",
+                "--port", str(http_port)], stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL)
+            try:
+                wait_http_ready(http_port, lambda: process.poll() is None)
+                asyncio.run(http_solve(self, http_port))
+            finally:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+
     def test_sdk_stdio_tools_and_solve(self):
         from mcp import ClientSession, StdioServerParameters
         from mcp.client.stdio import stdio_client
@@ -259,8 +312,10 @@ class DockerTests(unittest.TestCase):
         try:
             subprocess.run(["docker", "build", "-t", tag, str(ROOT)], check=True,
                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=300)
-            container_id = subprocess.check_output(["docker", "run", "-d", "--rm", "-p",
-                "127.0.0.1::7000", tag, "--seed", "7"], text=True).strip()
+            container_id = subprocess.check_output(["docker", "run", "-d", "--rm",
+                "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+                "--tmpfs", "/tmp", "-p", "127.0.0.1::7000", "-p", "127.0.0.1::8000",
+                tag, "--seed", "7"], text=True).strip()
             published = subprocess.check_output(["docker", "port", container_id, "7000"], text=True)
             port = int(published.strip().rsplit(":", 1)[1])
             deadline = time.monotonic() + 20
@@ -276,6 +331,19 @@ class DockerTests(unittest.TestCase):
                 self.assertEqual(socket_solve(actor)["reward"], 1)
             finally:
                 actor.close()
+            with self.subTest(transport="MCP HTTP"):
+                if not importlib.util.find_spec("mcp"):
+                    self.skipTest("mcp SDK not installed")
+                published = subprocess.check_output(
+                    ["docker", "port", container_id, "8000"], text=True)
+                http_port = int(published.strip().rsplit(":", 1)[1])
+
+                def running():
+                    return subprocess.check_output(["docker", "inspect", "--format",
+                        "{{.State.Running}}", container_id], text=True).strip() == "true"
+
+                wait_http_ready(http_port, running)
+                asyncio.run(http_solve(self, http_port))
         finally:
             if container_id:
                 subprocess.run(["docker", "stop", "-t", "5", container_id], check=True,

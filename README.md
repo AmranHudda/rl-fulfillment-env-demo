@@ -92,7 +92,8 @@ configuration (for clients supporting URL configuration:
 
 ```sh
 docker build -t fulfillment-controller .
-docker run --rm -p 7000:7000 -p 8000:8000 fulfillment-controller --seed 7
+docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --tmpfs /tmp -p 7000:7000 -p 8000:8000 fulfillment-controller --seed 7
 ```
 
 The slim Python image runs as a non-root user and supervises both the controller
@@ -102,14 +103,21 @@ filesystem mounts or controller logs. Prefer `-p 127.0.0.1:7000:7000` and
 `-p 127.0.0.1:8000:8000` if remote access is unnecessary: the shorter commands
 above publish on all host interfaces. Container arguments are controller options;
 keep its port at 7000 because the bridge uses that internal port.
+The recommended hardening flags make the root filesystem read-only, drop Linux
+capabilities and prevent privilege escalation; `/tmp` remains writable in memory
+for runtime temporary files. Integration tests use these same flags and solve
+through both published ports, including the SDK's streamable HTTP client on 8000.
+If logging is enabled with `--log`, provision a separate controller-only writable
+volume for that path; do not expose it to the actor.
 
 ## Evidence and limits
 
-- 27 tests: the original 19 unchanged tests (including scripted solutions across
-  100 seeds and immutable trace snapshots) plus eight integration tests covering
+- 28 tests: the original 19 unchanged tests (including scripted solutions across
+  100 seeds and immutable trace snapshots) plus nine integration tests covering
   real subprocess/socket episodes, protocol probes, concurrent independence,
-  operator seeds, private logs, defensive input/idle handling, SDK stdio MCP and
-  a Docker build/published-port solve. MCP skips without the SDK; Docker skips
+  operator seeds, private logs, defensive input/idle handling, SDK stdio and
+  streamable HTTP MCP, and hardened Docker TCP and MCP HTTP published-port solves.
+  MCP tests (including the Docker MCP subtest) skip without the SDK; Docker skips
   without a working daemon. Run `python3 -m unittest -v` for counts and skips.
 - Different valid action orders are accepted.
 - Negative cases cover fabricated receipts, missing reservations, protected
