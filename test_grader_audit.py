@@ -14,9 +14,19 @@ class GraderRegressionTests(unittest.TestCase):
         self.assertIn("observation", call(env, "reserve", dict(args, warehouse="north"), "reserve"))
 
         before = env.snapshot
-        self.assertEqual(call(env, "ship", args, "early-ship"), failure)
+        replay = call(env, "ship", args, "early-ship")
+        self.assertIn("replay", replay["error"].lower())
+        self.assertIn("new request_id", replay["error"])
+        self.assertIn(failure["error"], replay["error"])
+        self.assertEqual(dict(replay, error=failure["error"]), failure)
         self.assertEqual(env.snapshot, before)
         self.assertIn("observation", call(env, "ship", args, "fresh-ship"))
+
+    def test_reset_describes_mutation_request_ids(self):
+        task = FulfillmentEnv(7).reset(7)["task"]
+        self.assertIn("request_id", task)
+        self.assertIn("1 to 80", task)
+        self.assertIn("new request_id", task)
 
     def test_unsuccessful_mutation_id_cannot_be_rebound(self):
         env = FulfillmentEnv(7)

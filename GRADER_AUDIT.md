@@ -27,6 +27,8 @@ successful-result replays, 947 rejection replays and 5,382 conflicts.
   before reservation could also execute on exact replay after reservation.
   Well-formed mutations now cache their tool-level result, including rejection.
   Validation errors do not bind an ID, and conflicts do not replace a result.
+  A replayed rejection preserves the original error and tells the actor to use
+  a new `request_id` to retry.
 - **A missing shipped order raised `KeyError` rather than grading false.**
   Deleting that order while keeping its shipment reproduces the failure. The
   shipment check now rejects a missing order. This was a controller-side
@@ -68,7 +70,7 @@ entire compound predicate was disabled, separately from disabling its operands.
 
 On the fixed grader, the original tests caught 37 of 67; the missing-order
 fix adds one more surviving false-forced operand (`final is None` inside
-the shipment check). The expanded 38-test suite catches 65 of 67, including
+the shipment check). The expanded 39-test suite catches 65 of 67, including
 that new operand. The two survivors are redundant under single mutations:
 
 - `oid in shipped -> False`: two shipment dictionary entries have distinct

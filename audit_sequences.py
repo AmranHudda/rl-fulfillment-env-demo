@@ -177,7 +177,13 @@ def episode(seed, mode):
                 assert "error" not in result, "legal mutation rejected"
                 before = env.snapshot
                 if index == 0:
-                    assert step(early) == failure and env.snapshot == before, "rejected replay changed"
+                    replay = step(early)
+                    error = replay.get("error", "")
+                    assert "replay" in error.lower() and "new request_id" in error, "replay guidance missing"
+                    assert failure["error"] in error, "original rejection missing"
+                    assert dict(replay, error=failure["error"]) == failure and env.snapshot == before, (
+                        "rejected replay changed outcome or state"
+                    )
                     counts["rejected replays"] += 1
                 conflict = request("ship", key, order_id="unknown")
                 assert "already bound" in step(conflict).get("error", ""), "conflict not recognized"

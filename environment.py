@@ -60,7 +60,11 @@ class FulfillmentEnv:
         return {
             "task": "Fulfill and close each ticket whose order does not need manual review. "
                     "Use available inventory. Leave review-only tickets and unrelated orders unchanged. "
-                    "Finish only when the work is complete.",
+                    "Finish only when the work is complete. "
+                    "Mutations require a request_id of 1 to 80 characters. "
+                    "Reusing it with the same tool and arguments replays the prior outcome without "
+                    "running the mutation again; using it with a different payload is rejected. "
+                    "Use a new request_id to retry a rejected mutation.",
             "tools": {name: sorted(args) for name, args in self.ARGUMENTS.items()},
             "max_steps": self.max_steps,
         }
@@ -157,6 +161,9 @@ class FulfillmentEnv:
                     previous, result = self._seen_requests[key]
                     if previous != fingerprint:
                         raise TaskError("request_id was already bound to another payload")
+                    if "error" in result:
+                        raise TaskError("Replay of an earlier rejected mutation. "
+                                        "Use a new request_id to retry. Original error: " + result["error"])
                     return copy.deepcopy(result)
                 record_request = True
             result = {"observation": self._run(tool, args), "reward": 0,
