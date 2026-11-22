@@ -1,7 +1,7 @@
 import unittest
 
 from environment import FulfillmentEnv
-from test_environment import call
+from test_environment import call, solve
 
 
 class GraderRegressionTests(unittest.TestCase):
@@ -28,3 +28,10 @@ class GraderRegressionTests(unittest.TestCase):
         result = call(env, "reserve", dict(args, warehouse="north"), "reserve")
         self.assertIn("already bound", result.get("error", ""))
         self.assertEqual(env.snapshot, before)
+
+    def test_grader_returns_false_when_shipped_order_is_missing(self):
+        env = FulfillmentEnv(7)
+        self.assertEqual(solve(env)["reward"], 1)
+        oid = next(iter(env.snapshot["shipments"].values()))["order_id"]
+        del env._state["orders"][oid]
+        self.assertFalse(env.grade())
