@@ -87,8 +87,8 @@ class FulfillmentEnv:
         self._mutations = set(self._spec["mutations"])
         self._initial = copy.deepcopy(self._state)
         self._eligible = set(self._facts["eligible"])
-        self.max_steps = (self._max_steps_override if self._max_steps_override is not None
-                          else 64 if variant == "base" and count == 4 else 8 * count + 16)
+        self._max_steps = (self._max_steps_override if self._max_steps_override is not None
+                           else 64 if variant == "base" and count == 4 else 8 * count + 16)
         self._seen_requests = {}
         self._steps = 0
         self._done = self._truncated = False
@@ -97,6 +97,14 @@ class FulfillmentEnv:
             "tools": {name: sorted(args) for name, args in self._arguments.items()},
             "max_steps": self.max_steps,
         }
+
+    @property
+    def max_steps(self):
+        return self._max_steps
+
+    @max_steps.setter
+    def max_steps(self, value):
+        self._max_steps = self._max_steps_override = value
 
     @property
     def snapshot(self):
