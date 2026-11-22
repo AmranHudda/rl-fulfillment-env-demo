@@ -278,6 +278,28 @@ class IsolationTests(unittest.TestCase):
 
 @unittest.skipUnless(importlib.util.find_spec("mcp"), "mcp SDK not installed")
 class MCPTests(unittest.TestCase):
+    def test_broken_connection_write_cleanup_and_reconnect(self):
+        from mcp_server import ControllerClient
+
+        with controller("--seed", "7") as port:
+            client = ControllerClient(("127.0.0.1", port))
+            try:
+                for args in ({}, {"padding": "x" * 16384}):
+                    with self.subTest(buffered=not args):
+                        self.assertIn("observation", json.loads(client.call("inventory")))
+                        client.connection.shutdown(socket.SHUT_RDWR)
+                        self.assertEqual(json.loads(client.call("inventory", args)), {
+                            "error": "Controller connection lost; episode ended", "reward": 0,
+                            "terminated": True, "truncated": False})
+                        self.assertIsNone(client.stream)
+                        self.assertIsNone(client.connection)
+                        self.assertIsNone(client.description)
+                        self.assertEqual(set(json.loads(client.call())),
+                                         {"task", "tools", "max_steps"})
+                        self.assertIn("observation", json.loads(client.call("inventory")))
+            finally:
+                client.close()
+
     def test_controller_idle_loss_is_explicit(self):
         from mcp import ClientSession, StdioServerParameters
         from mcp.client.stdio import stdio_client

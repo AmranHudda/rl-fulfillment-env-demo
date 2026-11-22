@@ -16,12 +16,15 @@ class ControllerClient:
         self.lock = threading.Lock()
 
     def close(self):
-        if self.stream:
-            self.stream.close()
-        if self.connection:
-            self.connection.close()
+        stream, connection = self.stream, self.connection
         self.stream = self.connection = None
         self.description = None
+        for resource in (stream, connection):
+            if resource is not None:
+                try:
+                    resource.close()
+                except OSError:
+                    pass
 
     def read(self):
         line = self.stream.readline(65537)

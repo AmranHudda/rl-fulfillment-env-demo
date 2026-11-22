@@ -124,11 +124,12 @@ SIGTERM/SIGINT shutdown exits zero; forwarded shutdown signals are not failures.
 
 ## Evidence and limits
 
-- 32 tests: the original 19 unchanged tests (including scripted solutions across
-  100 seeds and immutable trace snapshots) plus thirteen integration tests covering
+- 33 tests: the original 19 unchanged tests (including scripted solutions across
+  100 seeds and immutable trace snapshots) plus fourteen integration tests covering
   real subprocess/socket episodes, protocol probes, concurrent independence,
   operator seeds, private logs, defensive input/idle handling, SDK stdio and
-  streamable HTTP MCP, explicit controller disconnects, and hardened Docker TCP
+  streamable HTTP MCP, explicit controller disconnects and broken-write recovery,
+  and hardened Docker TCP
   and MCP HTTP published-port solves, strict JSON logs and entrypoint failures.
   MCP tests (including the Docker MCP subtest) skip without the SDK; Docker skips
   without a working daemon. Run `python3 -m unittest -v` for counts and skips.
