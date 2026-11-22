@@ -415,31 +415,58 @@ VARIANTS.update(split=generate_split, duplicate=generate_duplicate)
 def generate_stockout(env, seed, count):
     spec = generate_base(env, seed, count)
     state = spec["state"]
-    eligible = sorted(spec["facts"]["eligible"])
-    short = random.Random(seed).sample(eligible, max(2, len(eligible) // 2))
-    for oid in short:
-        state["orders"][oid].update(sku="limited-pin", qty=1)
-    for stock in state["inventory"].values():
-        stock["limited-pin"] = 0
-    state["inventory"]["north"]["limited-pin"] = len(short) - 1
+    rng = random.Random(seed)
+    ids = list(state["orders"])
+    reviews = set(rng.sample(ids[3:], count // 4))
+    unrelated = sorted(reviews)[-1]
+    state["tickets"] = {"ticket-" + oid.removeprefix("order-"): dict(
+        order_id=oid, status="open", receipt=None) for oid in ids if oid != unrelated}
+    for oid, order in state["orders"].items():
+        order["needs_review"] = oid in reviews
+    eligible = set(ids) - reviews
+    spec["facts"]["eligible"] = eligible
+    scale = rng.randint(1, 5)
+    for oid, qty in zip(ids[:3], (3 * scale, scale, 3 * scale)):
+        state["orders"][oid].update(sku="limited-pin", qty=qty)
+    inventory = {"north": {}, "south": {}}
+    for i, (oid, order) in enumerate(state["orders"].items()):
+        sku = order["sku"]
+        for stock in inventory.values():
+            stock.setdefault(sku, 0)
+        if sku != "limited-pin":
+            inventory["south" if i % 2 else "north"][sku] += order["qty"]
+    for stock in inventory.values():
+        stock["limited-pin"] = 3 * scale
+    state["inventory"] = inventory
     spec["facts"]["short_sku"] = "limited-pin"
+    quantities = [state["orders"][oid]["qty"] for oid in ids[:3]]
+    def optimum(index, north, south):
+        if index == len(quantities):
+            return 0
+        qty = quantities[index]
+        choices = [optimum(index + 1, north, south)]
+        if north >= qty:
+            choices.append(qty + optimum(index + 1, north - qty, south))
+        if south >= qty:
+            choices.append(qty + optimum(index + 1, north, south - qty))
+        return max(choices)
+    spec["facts"]["optimum"] = optimum(0, 3 * scale, 3 * scale)
     spec["grade"] = grade_stockout
-    spec["task"] = ("Fulfill and close all non-review tickets that stock permits. Stock may run out: "
-                    "leave an order that cannot be filled completely untouched and its ticket open. "
-                    "Never leave a reservation unshipped. Leave review and unrelated state unchanged.")
+    spec["task"] = ("Ship as many units as possible of the limited-pin SKU; each order must ship "
+                    "from one warehouse, never split. Fulfill all other non-review tickets. Leave "
+                    "unfulfilled orders completely untouched and their tickets open. Never leave "
+                    "reservations unshipped. Leave review and unrelated state unchanged.")
     return spec
 
 
 def grade_stockout(env):
-    missing = env._eligible - {s["order_id"] for s in env._state["shipments"].values()}
-    if len(missing) != 1:
+    shipped = {s["order_id"] for s in env._state["shipments"].values()}
+    short = {oid for oid in env._eligible
+             if env._initial["orders"][oid]["sku"] == env._facts["short_sku"]}
+    if (not env._eligible - short <= shipped
+            or sum(env._initial["orders"][oid]["qty"] for oid in short & shipped) != env._facts["optimum"]):
         return False
-    oid = next(iter(missing))
-    order = env._initial["orders"][oid]
-    if (order["sku"] != env._facts["short_sku"]
-            or sum(s.get(order["sku"], 0) for s in env._state["inventory"].values()) >= order["qty"]):
-        return False
-    return env._grade_base(eligible=env._eligible - missing)
+    return env._grade_base(eligible=env._eligible & shipped)
 
 
 def close_special(env, args, status, ledger):

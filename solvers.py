@@ -16,7 +16,43 @@ def solve_duplicate(env, *, reverse=False, shuffle_seed=None, finish=True):
 
 
 def solve_stockout(env, *, reverse=False, shuffle_seed=None, finish=True):
-    return _solve(env, reverse=reverse, shuffle_seed=shuffle_seed, finish=finish, stockout=True)
+    call = _caller(env, "planned")
+    tickets = call("list_tickets")["observation"]
+    inventory = call("inventory")["observation"]
+    orders = {t["order_id"]: call("get_order", dict(order_id=t["order_id"]))["observation"]
+              for t in tickets.values()}
+    groups = {}
+    for oid, order in orders.items():
+        if not order["needs_review"]:
+            groups.setdefault(order["sku"], []).append((oid, order["qty"]))
+    plan = {}
+    for sku, group in groups.items():
+        capacities = tuple(inventory[w].get(sku, 0) for w in inventory)
+        states = {capacities: (0, {})}
+        for oid, qty in group:
+            updated = dict(states)
+            for remaining, (units, allocation) in states.items():
+                for i, warehouse in enumerate(inventory):
+                    if remaining[i] >= qty:
+                        after = list(remaining)
+                        after[i] -= qty
+                        key = tuple(after)
+                        if units + qty > updated.get(key, (-1, {}))[0]:
+                            updated[key] = (units + qty, dict(allocation, **{oid: warehouse}))
+            states = updated
+        plan.update(max(states.values(), key=lambda value: value[0])[1])
+    work = sorted(tickets.items(), reverse=reverse)
+    if shuffle_seed is not None:
+        random.Random(shuffle_seed).shuffle(work)
+    for tid, ticket in work:
+        oid = ticket["order_id"]
+        if oid not in plan:
+            continue
+        call("reserve", dict(order_id=oid, warehouse=plan[oid]))
+        receipt = call("ship", dict(order_id=oid))["observation"]["receipt"]
+        call("close_ticket", dict(ticket_id=tid, receipt=receipt))
+    if finish:
+        return call("finish")
 
 
 def _caller(env, prefix, *, ignore_errors=False):

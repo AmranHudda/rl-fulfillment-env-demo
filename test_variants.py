@@ -138,6 +138,27 @@ def tool(env, name, args=None, key=None):
     return env.step(request)
 
 
+def naive_stockout(env, reverse=False):
+    tickets = tool(env, "list_tickets")["observation"]
+    inventory = tool(env, "inventory")["observation"]
+    for tid, ticket in sorted(tickets.items(), reverse=reverse):
+        oid = ticket["order_id"]
+        order = tool(env, "get_order", dict(order_id=oid))["observation"]
+        if order["needs_review"]:
+            continue
+        warehouse = next((w for w, stock in inventory.items()
+                          if stock.get(order["sku"], 0) >= order["qty"]), None)
+        if warehouse is None:
+            continue
+        result = tool(env, "reserve", dict(order_id=oid, warehouse=warehouse), tid + "r")
+        if "error" in result:
+            raise AssertionError(result)
+        inventory[warehouse][order["sku"]] -= order["qty"]
+        receipt = tool(env, "ship", dict(order_id=oid), tid + "s")["observation"]["receipt"]
+        tool(env, "close_ticket", dict(ticket_id=tid, receipt=receipt), tid + "c")
+    return tool(env, "finish")
+
+
 class CarelessActorTests(unittest.TestCase):
     def test_careless_actor_fails_all_new_variants(self):
         for variant in ("split", "duplicate", "stockout", "cancellation", "refund"):
@@ -369,22 +390,42 @@ class StockoutTests(unittest.TestCase):
     def test_solutions(self):
         check_variant_solutions(self, "stockout", solve_stockout)
 
-    def test_shortage_and_order_dependent_survivor(self):
-        survivors = []
+    def test_optimum_and_untouched_unfulfilled_orders(self):
         for reverse in (False, True):
             env = FulfillmentEnv(7, variant="stockout", difficulty="medium")
             before = env.snapshot
             sku = env._facts["short_sku"]
             demand = sum(before["orders"][oid]["qty"] for oid in env._eligible
                          if before["orders"][oid]["sku"] == sku)
-            self.assertEqual(sum(s[sku] for s in before["inventory"].values()), demand - 1)
-            self.assertTrue(all(o["qty"] == 1 for o in before["orders"].values() if o["sku"] == sku))
+            self.assertLess(sum(s[sku] for s in before["inventory"].values()), demand)
+            self.assertGreater(len({o["qty"] for o in before["orders"].values() if o["sku"] == sku}), 1)
             solve_stockout(env, reverse=reverse)
             remaining = [oid for oid in env._eligible if env.snapshot["orders"][oid]["status"] == "open"]
             self.assertEqual(len(remaining), 1)
             self.assertEqual(env.snapshot["orders"][remaining[0]], before["orders"][remaining[0]])
-            survivors.append(remaining[0])
-        self.assertNotEqual(*survivors)
+            units = sum(s["qty"] for s in env.snapshot["shipments"].values() if s["sku"] == sku)
+            self.assertEqual(units, env._facts["optimum"])
+
+    def test_naive_first_fit_is_suboptimal_in_both_orders(self):
+        for difficulty in DIFFICULTIES:
+            for seed in range(100):
+                for reverse in (False, True):
+                    env = FulfillmentEnv(seed, variant="stockout", difficulty=difficulty)
+                    self.assertEqual(naive_stockout(env, reverse=reverse)["reward"], 0)
+
+    def test_leaving_fillable_normal_order_open_fails(self):
+        initial = self.env.snapshot
+        solve_stockout(self.env, finish=False)
+        receipt, shipment = next((r, s) for r, s in self.env._state["shipments"].items()
+                                 if s["sku"] != self.env._facts["short_sku"])
+        oid = shipment["order_id"]
+        self.env._state["inventory"][shipment["warehouse"]][shipment["sku"]] += shipment["qty"]
+        self.env._state["orders"][oid] = initial["orders"][oid]
+        for tid, ticket in initial["tickets"].items():
+            if ticket["order_id"] == oid:
+                self.env._state["tickets"][tid] = ticket
+        del self.env._state["shipments"][receipt]
+        self.assertEqual(tool(self.env, "finish")["reward"], 0)
 
     def test_too_many_orders_left_open(self):
         self.assertEqual(tool(self.env, "finish")["reward"], 0)
