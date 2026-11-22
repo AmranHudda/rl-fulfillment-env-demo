@@ -123,8 +123,13 @@ def solve_cancellation(env, *, reverse=False, shuffle_seed=None, finish=True):
             call("reserve", dict(order_id=oid, warehouse=warehouse))
         if oid in cancelled:
             continue
-        result = call("ship", dict(order_id=oid))
-        if oid not in cancelled:
-            call("close_ticket", dict(ticket_id=tid, receipt=result["observation"]["receipt"]))
+        if order["status"] == "shipped":
+            receipt = order["receipt"]
+        else:
+            result = call("ship", dict(order_id=oid))
+            if oid in cancelled:
+                continue
+            receipt = result["observation"]["receipt"]
+        call("close_ticket", dict(ticket_id=tid, receipt=receipt))
     if finish:
         return call("finish")

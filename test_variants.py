@@ -125,6 +125,16 @@ def check_variant_solutions(test, variant, solver):
                         test.assertEqual(env.snapshot["orders"][target]["status"], "cancelled")
 
 
+class StepBudgetTests(unittest.TestCase):
+    def test_assigned_budget_survives_reset(self):
+        for variant in ("base", "cancellation"):
+            with self.subTest(variant=variant):
+                env = FulfillmentEnv(7, variant=variant, difficulty="medium")
+                env.max_steps = 9
+                self.assertEqual(env.reset(8)["max_steps"], 9)
+                self.assertEqual(env.max_steps, 9)
+
+
 class SplitTests(unittest.TestCase):
     def setUp(self):
         self.env = FulfillmentEnv(7, variant="split", difficulty="medium")
@@ -459,6 +469,28 @@ class CancellationTests(unittest.TestCase):
         first = [tool(self.env, "inventory") for _ in range(6)]
         self.env.reset(7)
         self.assertEqual(first, [tool(self.env, "inventory") for _ in range(6)])
+
+
+class CancellationResumeTests(unittest.TestCase):
+    def test_solver_resumes_with_shipped_order_and_open_ticket(self):
+        for seed in range(20):
+            with self.subTest(seed=seed):
+                env = FulfillmentEnv(seed, variant="cancellation", difficulty="medium")
+                tid, ticket = next(
+                    (tid, t) for tid, t in sorted(env.snapshot["tickets"].items())
+                    if t["order_id"] in env._eligible
+                    and t["order_id"] not in env._facts["priority"][:1])
+                env._facts["cancel_step"] = 10 ** 6
+                oid = ticket["order_id"]
+                order = env.snapshot["orders"][oid]
+                warehouse = next(w for w, stock in env.snapshot["inventory"].items()
+                                 if stock.get(order["sku"], 0) >= order["qty"])
+                env.step({"tool": "reserve", "args": {"order_id": oid, "warehouse": warehouse},
+                          "request_id": "pre-reserve"})
+                shipped = env.step({"tool": "ship", "args": {"order_id": oid},
+                                    "request_id": "pre-ship"})
+                self.assertNotIn("error", shipped)
+                self.assertEqual(solve_cancellation(env)["reward"], 1)
 
 
 class RefundTests(unittest.TestCase):
