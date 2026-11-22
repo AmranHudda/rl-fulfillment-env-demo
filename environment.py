@@ -188,8 +188,8 @@ class FulfillmentEnv:
             warehouse[shipment["sku"]] -= shipment["qty"]
             if warehouse[shipment["sku"]] < 0:
                 return False
-            final = state["orders"][oid]
-            if (final["status"] != "shipped" or final["receipt"] != receipt
+            final = state["orders"].get(oid)
+            if (final is None or final["status"] != "shipped" or final["receipt"] != receipt
                     or final["warehouse"] != shipment["warehouse"]):
                 return False
             shipped.add(oid)
