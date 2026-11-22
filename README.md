@@ -124,8 +124,9 @@ SIGTERM/SIGINT shutdown exits zero; forwarded shutdown signals are not failures.
 
 ## Evidence and limits
 
-- 33 tests: the original 19 unchanged tests (including scripted solutions across
-  100 seeds and immutable trace snapshots) plus fourteen integration tests covering
+- 52 tests: the original 19 unchanged tests (including scripted solutions across
+  100 seeds and immutable trace snapshots), 19 grader-audit tests, and fourteen
+  isolation integration tests covering
   real subprocess/socket episodes, protocol probes, concurrent independence,
   operator seeds, private logs, defensive input/idle handling, SDK stdio and
   streamable HTTP MCP, explicit controller disconnects and broken-write recovery,
@@ -143,6 +144,8 @@ SIGTERM/SIGINT shutdown exits zero; forwarded shutdown signals are not failures.
   condition mutants; the other two are redundant with intact checks. This is
   not exhaustive and does not verify whether the actor reads order or stock
   before acting: the reward checks the final state, not the action history.
+  That audit did not exercise process isolation; the separate isolation tests
+  cover the port-only process boundary described below, not direct host access.
 - `demo.py` prints tool transcripts from a scripted baseline and a negative
   control. These are explicitly not LLM or trained-policy rollouts.
 - With a port-only actor, the process boundary (and optional container boundary)
