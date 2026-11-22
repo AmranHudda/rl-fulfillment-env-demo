@@ -7,8 +7,18 @@ import time
 
 def main():
     children = []
+    shutdown_requested = False
+    failure = 0
+
+    def child_failure():
+        return next((child.returncode for child in children
+                     if child.poll() is not None and child.returncode != 0), 0)
 
     def stop(signum, frame):
+        nonlocal shutdown_requested, failure
+        if not shutdown_requested:
+            failure = child_failure()
+            shutdown_requested = True
         for child in children:
             if child.poll() is None:
                 child.terminate()
@@ -21,12 +31,11 @@ def main():
         children.append(subprocess.Popen([sys.executable, "mcp_server.py", "--transport",
                                           "http", "--host", "0.0.0.0", "--controller",
                                           "127.0.0.1:7000"]))
-        while all(child.poll() is None for child in children):
+        while not shutdown_requested and all(child.poll() is None for child in children):
             time.sleep(0.1)
-        failures = [child.returncode for child in children
-                    if child.poll() is not None and child.returncode != 0]
-        result = failures[0] if failures else 0
-        return result if result >= 0 else 128 - result
+        if not shutdown_requested:
+            failure = child_failure()
+        return failure if failure >= 0 else 128 - failure
     finally:
         stop(None, None)
         for child in children:

@@ -5,6 +5,7 @@ import importlib.util
 import json
 from pathlib import Path
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -355,6 +356,23 @@ class MCPTests(unittest.TestCase):
 
 
 class EntrypointTests(unittest.TestCase):
+    @unittest.skipUnless(importlib.util.find_spec("mcp"), "mcp SDK not installed")
+    def test_requested_shutdown_exits_zero(self):
+        for signum in (signal.SIGTERM, signal.SIGINT):
+            with self.subTest(signal=signum):
+                port = free_port()
+                process = subprocess.Popen([sys.executable, str(ROOT / "container_entrypoint.py"),
+                    "--port", str(port)], cwd=ROOT, stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL)
+                try:
+                    wait_ready(port, process)
+                    process.send_signal(signum)
+                    self.assertEqual(process.wait(timeout=10), 0)
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                        process.wait()
+
     def test_controller_startup_failure_exits_nonzero(self):
         with tempfile.TemporaryDirectory() as directory:
             log_path = str(Path(directory) / "missing" / "episodes.jsonl")

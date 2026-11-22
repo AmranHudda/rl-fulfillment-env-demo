@@ -119,12 +119,13 @@ through both published ports, including the SDK's streamable HTTP client on 8000
 If logging is enabled with `--log`, provision a separate controller-only writable
 volume for that path; do not expose it to the actor.
 The entrypoint stops both servers if either exits, and exits nonzero when a child
-fails so startup failures are visible to container tooling.
+fails on its own so startup failures are visible to container tooling. Requested
+SIGTERM/SIGINT shutdown exits zero; forwarded shutdown signals are not failures.
 
 ## Evidence and limits
 
-- 31 tests: the original 19 unchanged tests (including scripted solutions across
-  100 seeds and immutable trace snapshots) plus twelve integration tests covering
+- 32 tests: the original 19 unchanged tests (including scripted solutions across
+  100 seeds and immutable trace snapshots) plus thirteen integration tests covering
   real subprocess/socket episodes, protocol probes, concurrent independence,
   operator seeds, private logs, defensive input/idle handling, SDK stdio and
   streamable HTTP MCP, explicit controller disconnects, and hardened Docker TCP
